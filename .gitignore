@@ -1,0 +1,24 @@
+# Environnement Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+env/
+
+
+# Fichiers temporaires
+*.wav
+*.webm
+*.mp3
+.env
+
+# Configuration de l'IDE
+.vscode/
+.idea/
+
+# Docker
+*.pid
+
+#
+output.mp3
+/tmp/
+*.pyc
