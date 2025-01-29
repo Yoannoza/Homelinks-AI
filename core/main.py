@@ -56,7 +56,7 @@ genai.configure(api_key=GENAI_API_KEY)
 
 # Initialisation de l'application Flask
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://homelinks.vercel.app"])
 socketio = SocketIO(app, cors_allowed_origins="https://homelinks.vercel.app/")
 # Configurer le logging
 # logging.basicConfig(level=logging.DEBUG)
