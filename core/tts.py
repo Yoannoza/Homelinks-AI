@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def speech(text):
-    # Variables depuis .env
+    """Génère de la parole à partir d'un texte et sauvegarde le fichier audio"""
     XI_API_KEY = os.getenv("XI_API_KEY")
-    VOICE_ID = "FvmvwvObRqIHojkEGh5N"
+    VOICE_ID = "5Qfm4RqcAer0xoyWtoHC"
     OUTPUT_PATH = "output.mp3"
     CHUNK_SIZE = 1024
 

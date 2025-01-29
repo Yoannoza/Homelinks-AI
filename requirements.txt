@@ -5,3 +5,7 @@ SpeechRecognition
 requests
 google-generativeai
 python-dotenv
+gunicorn
+openai
+flask-socketio
+eventlet
