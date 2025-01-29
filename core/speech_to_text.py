@@ -11,6 +11,12 @@ def transcribe_audio(file_path):
     load_dotenv()   
     try:
         temp_wav_path = file_path.replace(".webm", ".wav")
+        
+        FFMPEG_PATH = "../bin/ffmpeg"  # Change selon ton projet
+        AudioSegment.converter = FFMPEG_PATH
+
+        if not os.path.exists(FFMPEG_PATH):
+            raise RuntimeError("FFmpeg introuvable, assure-toi qu'il est bien dans /app/bin/ffmpeg")
 
         # Convertir WebM/Opus en WAV
         audio = AudioSegment.from_file(file_path, format="webm")
