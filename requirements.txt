@@ -9,3 +9,4 @@ gunicorn
 openai
 flask-socketio
 eventlet
+imageio[ffmpeg]
