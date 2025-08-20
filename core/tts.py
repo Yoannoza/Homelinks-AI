@@ -8,6 +8,13 @@ load_dotenv()
 def speech(text):
     """Génère de la parole à partir d'un texte et sauvegarde le fichier audio"""
     XI_API_KEY = os.getenv("XI_API_KEY")
+    
+    if not XI_API_KEY:
+        raise ValueError("XI_API_KEY is not set in environment variables")
+    
+    if not text or not text.strip():
+        raise ValueError("Text cannot be empty")
+    
     VOICE_ID = "5Qfm4RqcAer0xoyWtoHC"
     OUTPUT_PATH = "output.mp3"
     CHUNK_SIZE = 1024
@@ -21,7 +28,7 @@ def speech(text):
     }
 
     data = {
-        "text": text,
+        "text": text[:5000],  # Limit text length to prevent overly long requests
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {
             "stability": 0.5,
@@ -32,7 +39,7 @@ def speech(text):
     }
 
     try:
-        response = requests.post(tts_url, headers=headers, json=data, stream=True)
+        response = requests.post(tts_url, headers=headers, json=data, stream=True, timeout=30)
         response.raise_for_status()
 
         with open(OUTPUT_PATH, "wb") as f:
@@ -40,5 +47,11 @@ def speech(text):
                 f.write(chunk)
 
         print("Audio stream saved successfully.")
+    except requests.exceptions.Timeout:
+        raise Exception("TTS request timed out")
+    except requests.exceptions.HTTPError as e:
+        raise Exception(f"TTS API error: {e.response.status_code} - {e.response.text}")
     except requests.exceptions.RequestException as e:
-        print(f"Error in TTS request: {e}")
+        raise Exception(f"TTS request failed: {str(e)}")
+    except IOError as e:
+        raise Exception(f"Failed to save audio file: {str(e)}")
