@@ -14,6 +14,7 @@ import google.generativeai as genai
 from audio_processing import save_temp_file, clean_temp_file
 from speech_to_text import transcribe_audio
 from tts import speech
+from rate_limiter import rate_limit
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -31,9 +32,17 @@ def validate_environment():
     if not XI_API_KEY:
         missing_vars.append("XI_API_KEY")
     
+    # Optional but recommended
+    optional_missing = []
+    if not GENAI_API_KEY:
+        optional_missing.append("GENAI_API_KEY")
+    
     if missing_vars:
-        print(f"Warning: Missing environment variables: {', '.join(missing_vars)}")
-        print("Some features may not work properly without these variables.")
+        print(f"Warning: Missing required environment variables: {', '.join(missing_vars)}")
+        print("Some core features will not work properly without these variables.")
+    
+    if optional_missing:
+        print(f"Info: Optional environment variables not set: {', '.join(optional_missing)}")
     
     return len(missing_vars) == 0
 
@@ -100,8 +109,6 @@ def gen_response(sys_prompt, user_prompt):
 # Configurer l'API Google Generative AI
 if GENAI_API_KEY:
     genai.configure(api_key=GENAI_API_KEY)
-else:
-    print("Warning: GENAI_API_KEY not set - Google Generative AI features will not work")
 
 # Initialisation de l'application Flask
 app = Flask(__name__)
@@ -153,6 +160,60 @@ def health_check():
     
     return jsonify(status), 200
 
+@app.route('/', methods=['GET'])
+@app.route('/docs', methods=['GET'])
+def api_documentation():
+    """API documentation endpoint"""
+    docs = {
+        "api_name": "Homelinks AI Assistant API",
+        "version": "1.0.0",
+        "description": "Voice assistant API for smart home control",
+        "endpoints": {
+            "/health": {
+                "method": "GET",
+                "description": "Check API health and service status",
+                "response": "JSON with status information"
+            },
+            "/transcribe": {
+                "method": "POST",
+                "description": "Transcribe audio file to text",
+                "content_type": "multipart/form-data",
+                "parameters": {
+                    "audio": "Audio file (webm format, max 10MB)"
+                },
+                "rate_limit": "30 requests per hour",
+                "response": "JSON with transcription text"
+            },
+            "/process": {
+                "method": "POST", 
+                "description": "Process voice command and control smart home devices",
+                "content_type": "application/json",
+                "parameters": {
+                    "text": "Voice command text (required, max 1000 chars)",
+                    "state": "Current device state (optional)",
+                    "all_state": "Complete home state JSON (optional)"
+                },
+                "rate_limit": "100 requests per hour",
+                "response": "JSON with device commands and assistant response"
+            },
+            "/audio": {
+                "method": "GET",
+                "description": "Download generated speech audio file",
+                "response": "MP3 audio file"
+            }
+        },
+        "error_codes": {
+            "400": "Bad Request - Invalid input data",
+            "404": "Not Found - Resource not available", 
+            "429": "Too Many Requests - Rate limit exceeded",
+            "500": "Internal Server Error - Processing failed",
+            "502": "Bad Gateway - Invalid AI response",
+            "503": "Service Unavailable - External API unavailable"
+        }
+    }
+    
+    return jsonify(docs), 200
+
 
 def validate_audio_file(file):
     """Validate uploaded audio file"""
@@ -187,6 +248,7 @@ def validate_process_input(data):
     return True, "Valid input"
 
 @app.route('/transcribe', methods=['POST'])
+@rate_limit(limit=30, window=3600)  # 30 transcriptions per hour
 def transcribe_audio_route():
     logger.info("Transcribe audio request received")
     try:
@@ -225,6 +287,7 @@ def get_recording():
         return jsonify({"error": f"Failed to retrieve audio: {str(e)}"}), 500
 
 @app.route('/process', methods=['POST'])
+@rate_limit(limit=100, window=3600)  # 100 process requests per hour
 def process_transcription():
     logger.info("Process transcription request received")
     try:
