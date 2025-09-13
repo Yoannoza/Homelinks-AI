@@ -9,44 +9,58 @@ def transcribe_audio(file_path):
     """Convertir un fichier WebM en WAV puis le transcrire en texte"""
     # Charger les variables d'environnement
     load_dotenv()   
+    
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        raise ValueError("OPENAI_API_KEY is not set in environment variables")
+    
     try:
         temp_wav_path = file_path.replace(".webm", ".wav")
         
-        FFMPEG_PATH = "../bin/ffmpeg"  # Change selon ton projet
-        AudioSegment.converter = FFMPEG_PATH
-
-        if not os.path.exists(FFMPEG_PATH):
-            raise RuntimeError("FFmpeg introuvable, assure-toi qu'il est bien dans /app/bin/ffmpeg")
+        # Try to find ffmpeg in multiple locations
+        ffmpeg_paths = [
+            "../bin/ffmpeg",
+            "/usr/bin/ffmpeg", 
+            "/usr/local/bin/ffmpeg",
+            "ffmpeg"
+        ]
+        
+        ffmpeg_path = None
+        for path in ffmpeg_paths:
+            if os.path.exists(path) or (path == "ffmpeg"):  # System PATH
+                ffmpeg_path = path
+                break
+        
+        if ffmpeg_path and ffmpeg_path != "ffmpeg":
+            AudioSegment.converter = ffmpeg_path
 
         # Convertir WebM/Opus en WAV
         audio = AudioSegment.from_file(file_path, format="webm")
         audio.export(temp_wav_path, format="wav")
         
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = OpenAI(api_key=openai_key)
 
         # Reconnaissance vocale with whisper
-        audio_file= open(temp_wav_path, "rb")
-        transcription = client.audio.transcriptions.create(
-            model="whisper-1", 
-            file=audio_file,
-            response_format="text",
-            language="fr"
-        )
+        with open(temp_wav_path, "rb") as audio_file:
+            transcription = client.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file,
+                response_format="text",
+                language="fr"
+            )
 
-
-        # Reconnaissance vocale with speech_recognition
-        # recognizer = sr.Recognizer()
-        # with sr.AudioFile(temp_wav_path) as source:
-        #     audio_data = recognizer.record(source)
-
-        # transcription = recognizer.recognize_google(audio_data, language='fr-FR')
         print(f"\n\nTranscription: {transcription}")
 
         # Nettoyage des fichiers temporaires
-        os.remove(temp_wav_path)
+        if os.path.exists(temp_wav_path):
+            os.remove(temp_wav_path)
 
         return transcription
 
     except Exception as e:
         print(f"Error in transcribing audio: {e}")
+        # Clean up temp files on error
+        temp_wav_path = file_path.replace(".webm", ".wav")
+        if os.path.exists(temp_wav_path):
+            os.remove(temp_wav_path)
         raise e
