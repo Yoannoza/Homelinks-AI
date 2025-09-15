@@ -8,6 +8,11 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
+    gcc \
+    libasound2-dev \
+    portaudio19-dev \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Répertoire de travail
 WORKDIR /app
