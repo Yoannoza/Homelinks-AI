@@ -1,0 +1,29 @@
+name: Deploy Homelinks-AI - Production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'core/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'deploy.sh'
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Deploy on VM Production via SSH
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.GCP_VM_HOST }}
+          username: ${{ secrets.GCP_VM_USER }}
+          key: ${{ secrets.GCP_VM_SSH_KEY }}
+          script: |
+            cd Workspace/Homelinks-AI
+            git pull origin main
+            chmod +x deploy.sh
+            ./deploy.sh

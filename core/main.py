@@ -1,310 +1,312 @@
-import eventlet
-eventlet.monkey_patch()
-
+import asyncio
 import logging
-import requests
-from flask import Flask, request, jsonify, send_from_directory
-from flask_socketio import SocketIO, emit
-from flask_cors import CORS
 import os
 import json
+import uuid
+import tempfile
+from datetime import datetime
+from typing import Optional, Dict, Any
+from contextlib import asynccontextmanager
+
+import aiofiles
+import httpx
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request, BackgroundTasks
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel, Field, validator
+from starlette.middleware.sessions import SessionMiddleware
+import socketio
+
 from dotenv import load_dotenv
-import speech_recognition as sr
-import google.generativeai as genai
-from audio_processing import save_temp_file, clean_temp_file
+from audio_processing import save_temp_file, clean_temp_file, cleanup_old_temp_files, get_file_size_mb
 from speech_to_text import transcribe_audio
 from tts import speech
-from rate_limiter import rate_limit
+from ai_response import generate_ai_response
 
-# Charger les variables d'environnement
+# Load environment variables
 load_dotenv()
 
-# Validate environment variables
-HYPERBOLIC_API_KEY = os.getenv("HYPERBOLIC_API_KEY")
+# Environment variables validation
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GENAI_API_KEY = os.getenv("GENAI_API_KEY")
-XI_API_KEY = os.getenv("XI_API_KEY")
 
 def validate_environment():
     """Validate that required environment variables are set"""
     missing_vars = []
-    if not HYPERBOLIC_API_KEY:
-        missing_vars.append("HYPERBOLIC_API_KEY")
-    if not XI_API_KEY:
-        missing_vars.append("XI_API_KEY")
-    
-    # Optional but recommended
-    optional_missing = []
     if not GENAI_API_KEY:
-        optional_missing.append("GENAI_API_KEY")
+        missing_vars.append("GENAI_API_KEY")  # Maintenant requis pour la transcription
+    if not GEMINI_API_KEY:
+        missing_vars.append("GEMINI_API_KEY")  # Maintenant requis pour la transcription
+
     
     if missing_vars:
         print(f"Warning: Missing required environment variables: {', '.join(missing_vars)}")
         print("Some core features will not work properly without these variables.")
-    
-    if optional_missing:
-        print(f"Info: Optional environment variables not set: {', '.join(optional_missing)}")
-    
+        
     return len(missing_vars) == 0
 
-# Validate environment on startup
-validate_environment()
-
-Hyperbolic_api = HYPERBOLIC_API_KEY
-def gen_response(sys_prompt, user_prompt):
-    """Generate response from Hyperbolic API with proper error handling"""
-    if not HYPERBOLIC_API_KEY:
-        raise ValueError("HYPERBOLIC_API_KEY is not set in environment variables")
+# Pydantic models for request/response validation
+class ProcessRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000, description="Voice command text")
+    state: Optional[str] = Field("", description="Current device state")
+    all_state: Optional[str] = Field("", description="Complete home state JSON")
     
-    url = "https://api.hyperbolic.xyz/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {HYPERBOLIC_API_KEY}"
-    }
-    data = {
-        "messages": [
-            {
-                "role": "system",
-                "content": sys_prompt,
-            },
-            {
-                "role": "user",
-                "content": user_prompt
-            }
-        ],
-        "model": "deepseek-ai/DeepSeek-V3",
-        "max_tokens": 18917,
-        "temperature": 0.1,
-        "top_p": 0.9,
-        "response_format": {'type': 'json_object'}
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=data, timeout=30)
-        response.raise_for_status()
-        resp = response.json()
-        
-        if 'choices' not in resp or not resp['choices']:
-            raise ValueError("Invalid API response: no choices found")
-            
-        if 'message' not in resp['choices'][0] or 'content' not in resp['choices'][0]['message']:
-            raise ValueError("Invalid API response: no message content found")
-            
-        content = resp['choices'][0]['message']['content']
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse JSON response: {e}")
-            
-    except requests.exceptions.Timeout:
-        raise ValueError("API request timed out")
-    except requests.exceptions.ConnectionError:
-        raise ValueError("Failed to connect to API")
-    except requests.exceptions.HTTPError as e:
-        raise ValueError(f"API request failed with status {e.response.status_code}: {e.response.text}")
-    except requests.exceptions.RequestException as e:
-        raise ValueError(f"API request failed: {str(e)}")
-    
+    @validator('text')
+    def sanitize_text(cls, v):
+        import re
+        # Remove potential harmful characters but keep French accents
+        return re.sub(r'[^\w\s\-.,!?àáâäèéêëìíîïòóôöùúûüÿñç]', '', v.strip(), flags=re.IGNORECASE)
 
-    
-# Configurer l'API Google Generative AI
-if GENAI_API_KEY:
-    genai.configure(api_key=GENAI_API_KEY)
+class HealthResponse(BaseModel):
+    status: str
+    timestamp: str
+    services: Dict[str, bool]
+    audio_ready: bool
+    session_id: str
 
-# Initialisation de l'application Flask
-app = Flask(__name__)
+class TranscriptionResponse(BaseModel):
+    transcription: str
 
-# CORS configuration - more flexible for development
-allowed_origins = [
-    "https://homelinks.vercel.app",
-    "http://localhost:3000",  # For local development
-    "http://127.0.0.1:3000",  # For local development
-]
+class ProcessResponse(BaseModel):
+    salon: Optional[bool] = None
+    cuisine: Optional[bool] = None
+    chambre: Optional[bool] = None
+    exterieur: Optional[bool] = None
+    garage: Optional[bool] = None
+    smoke: Optional[bool] = None
+    presence: Optional[bool] = None
+    auth: Optional[bool] = None
+    door1: Optional[str] = None
+    door2: Optional[str] = None
+    time: Optional[str] = None
+    assistant_response: str
 
-# Allow localhost for development if in debug mode
-if app.debug:
-    allowed_origins.extend([
-        "http://localhost:5000",
-        "http://127.0.0.1:5000"
-    ])
+# Global storage for user sessions and audio files
+user_audio_files: Dict[str, str] = {}
+user_sessions: Dict[str, str] = {}
 
-CORS(app, origins=allowed_origins, methods=["GET", "POST"], allow_headers=["Content-Type"])
-socketio = SocketIO(app, cors_allowed_origins=allowed_origins)
-
-# Configurer le logging
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Initialiser l'état global et le modèle
-state = "none"
-# model = genai.GenerativeModel('gemini-1.5-pro')
+# Async HTTP client for API calls
+async def get_http_client():
+    return httpx.AsyncClient(timeout=30.0)
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint to monitor API status"""
-    status = {
-        "status": "healthy",
-        "timestamp": json.dumps({"time": "placeholder"}),  # Will be replaced by actual implementation
-        "services": {
-            "hyperbolic_api": bool(HYPERBOLIC_API_KEY),
-            "xi_api": bool(XI_API_KEY),
-            "genai_api": bool(GENAI_API_KEY)
-        }
-    }
-    
-    # Check if audio file exists
-    audio_file = 'output.mp3'
-    status["audio_ready"] = os.path.exists(audio_file)
-    
-    return jsonify(status), 200
+async def gen_response(sys_prompt: str, user_prompt: str) -> Dict[str, Any]:
+    """Generate response using the separated AI module"""
+    try:
+        # Extraire l'état de la maison du prompt système
+        # Le prompt contient l'état entre les premiers { }
+        import re
+        state_match = re.search(r'\{([^}]+)\}', sys_prompt)
+        home_state = state_match.group(1) if state_match else ""
+        
+        # Utiliser le module séparé
+        response = generate_ai_response(user_prompt, home_state)
+        return response
+        
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI response generation failed: {str(e)}")
 
-@app.route('/', methods=['GET'])
-@app.route('/docs', methods=['GET'])
-def api_documentation():
-    """API documentation endpoint"""
-    docs = {
-        "api_name": "Homelinks AI Assistant API",
-        "version": "1.0.0",
-        "description": "Voice assistant API for smart home control",
-        "endpoints": {
-            "/health": {
-                "method": "GET",
-                "description": "Check API health and service status",
-                "response": "JSON with status information"
-            },
-            "/transcribe": {
-                "method": "POST",
-                "description": "Transcribe audio file to text",
-                "content_type": "multipart/form-data",
-                "parameters": {
-                    "audio": "Audio file (webm format, max 10MB)"
-                },
-                "rate_limit": "30 requests per hour",
-                "response": "JSON with transcription text"
-            },
-            "/process": {
-                "method": "POST", 
-                "description": "Process voice command and control smart home devices",
-                "content_type": "application/json",
-                "parameters": {
-                    "text": "Voice command text (required, max 1000 chars)",
-                    "state": "Current device state (optional)",
-                    "all_state": "Complete home state JSON (optional)"
-                },
-                "rate_limit": "100 requests per hour",
-                "response": "JSON with device commands and assistant response"
-            },
-            "/audio": {
-                "method": "GET",
-                "description": "Download generated speech audio file",
-                "response": "MP3 audio file"
-            }
-        },
-        "error_codes": {
-            "400": "Bad Request - Invalid input data",
-            "404": "Not Found - Resource not available", 
-            "429": "Too Many Requests - Rate limit exceeded",
-            "500": "Internal Server Error - Processing failed",
-            "502": "Bad Gateway - Invalid AI response",
-            "503": "Service Unavailable - External API unavailable"
-        }
-    }
-    
-    return jsonify(docs), 200
+def get_user_session(request: Request) -> str:
+    """Get or create a unique session ID for the user"""
+    session_id = request.session.get('session_id')
+    if not session_id:
+        session_id = str(uuid.uuid4())[:8]
+        request.session['session_id'] = session_id
+    return session_id
 
-
-def validate_audio_file(file):
+def validate_audio_file(file: UploadFile) -> tuple[bool, str]:
     """Validate uploaded audio file"""
     if not file:
         return False, "No file provided"
     
-    if file.filename == '':
+    if not file.filename:
         return False, "No file selected"
     
     # Check file size (max 10MB)
-    file.seek(0, 2)  # Seek to end
-    size = file.tell()
-    file.seek(0)  # Seek back to start
+    if hasattr(file, 'size') and file.size:
+        if file.size > 10 * 1024 * 1024:
+            return False, "File too large (max 10MB)"
+        if file.size == 0:
+            return False, "Empty file not allowed"
     
-    if size > 10 * 1024 * 1024:
-        return False, "File too large (max 10MB)"
+    # Basic file type validation
+    allowed_extensions = ['.webm', '.wav', '.mp3', '.m4a', '.ogg']
+    file_ext = os.path.splitext(file.filename.lower())[1]
+    if file_ext not in allowed_extensions:
+        return False, f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
     
     return True, "Valid file"
 
-def validate_process_input(data):
-    """Validate input data for process endpoint"""
-    if not data:
-        return False, "No data provided"
-    
-    text = data.get('text', '')
-    if not text or not text.strip():
-        return False, "Text is required and cannot be empty"
-    
-    if len(text) > 1000:
-        return False, "Text too long (max 1000 characters)"
-    
-    return True, "Valid input"
+# Lifespan context manager for startup/shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting Homelinks AI Assistant API")
+    validate_environment()
+    yield
+    # Shutdown
+    logger.info("Shutting down Homelinks AI Assistant API")
+    # Cleanup any remaining audio files
+    for audio_file in user_audio_files.values():
+        try:
+            if os.path.exists(audio_file):
+                os.remove(audio_file)
+        except Exception:
+            pass
 
-@app.route('/transcribe', methods=['POST'])
-@rate_limit(limit=30, window=3600)  # 30 transcriptions per hour
-def transcribe_audio_route():
-    logger.info("Transcribe audio request received")
+# Create FastAPI app
+app = FastAPI(
+    title="Homelinks AI Assistant API",
+    description="Voice assistant API for smart home control",
+    version="2.0.0",
+    lifespan=lifespan
+)
+
+# CORS configuration
+allowed_origins = [
+    "https://homelinks.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# Add localhost for development
+if os.getenv("ENVIRONMENT") != "production":
+    allowed_origins.extend([
+        "http://localhost:5000",
+        "http://127.0.0.1:5000"
+    ])
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+# SocketIO setup
+sio = socketio.AsyncServer(
+    async_mode='asgi',
+    cors_allowed_origins=allowed_origins
+)
+socket_app = socketio.ASGIApp(sio, app)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
     try:
-        # Validate file
-        file = request.files.get('audio')
-        is_valid, message = validate_audio_file(file)
-        if not is_valid:
-            logger.warning(f"Invalid audio file: {message}")
-            return jsonify({"error": message}), 400
+        # Test basic functionality
+        current_time = datetime.now().isoformat()
         
-        # Recevoir et enregistrer le fichier audio
-        temp_audio_path = save_temp_file(file.read(), file_extension="webm")
-        logger.info(f"Audio file saved temporarily at {temp_audio_path}")
+        # Check environment variables
+        env_status = {
+            "genai_api_key": bool(GENAI_API_KEY),
+            "gemini_api_key": bool(GEMINI_API_KEY),
+        }
+        
+        # Check services availability (basic test)
+        services_status = {
+            "speech_to_text": True,  # Could add actual service test
+            "tts": True,
+            "ai_response": True
+        }
+        
+        return {
+            "status": "healthy",
+            "timestamp": current_time,
+            "services": services_status,
+            "environment": env_status,
+            "version": "1.0",
+            "uptime": current_time
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
 
-        # Convertir et transcrire l'audio
+
+@app.post("/transcribe", response_model=TranscriptionResponse)
+async def transcribe_audio_route(
+    background_tasks: BackgroundTasks,
+    audio: UploadFile = File(...)
+):
+    """Transcribe audio file to text"""
+    logger.info("Transcribe audio request received")
+    
+    # Cleanup old temporary files in background
+    background_tasks.add_task(cleanup_old_temp_files)
+    
+    # Validate file
+    is_valid, message = validate_audio_file(audio)
+    if not is_valid:
+        logger.warning(f"Invalid audio file: {message}")
+        raise HTTPException(status_code=400, detail=message)
+    
+    try:
+        # Read file content
+        file_content = await audio.read()
+        if not file_content:
+            raise HTTPException(status_code=400, detail="Empty file content")
+        
+        # Save temporary file
+        file_extension = os.path.splitext(audio.filename.lower())[1][1:] or "webm"
+        temp_audio_path = save_temp_file(file_content, file_extension=file_extension)
+        logger.info(f"Audio file saved temporarily at {temp_audio_path} ({get_file_size_mb(temp_audio_path):.2f} MB)")
+
+        # Transcribe audio
         transcription = transcribe_audio(temp_audio_path)
         logger.info("Audio transcription completed successfully")
 
-        # Nettoyer les fichiers temporaires
-        clean_temp_file(temp_audio_path)
+        # Clean up temporary file
+        background_tasks.add_task(clean_temp_file, temp_audio_path)
 
-        return jsonify({"transcription": transcription}), 200
+        return TranscriptionResponse(transcription=transcription)
 
     except Exception as e:
         logger.error(f"Transcription error: {str(e)}")
-        return jsonify({"error": f"Transcription failed: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
-@app.route('/audio')
-def get_recording():
+@app.get("/audio")
+async def get_recording(request: Request):
+    """Download generated speech audio file"""
     try:
-        audio_file = 'output.mp3'
-        if not os.path.exists(audio_file):
-            return jsonify({"error": "Audio file not found"}), 404
-        return send_from_directory('.', audio_file)
+        session_id = get_user_session(request)
+        audio_file = user_audio_files.get(session_id)
+        
+        if not audio_file or not os.path.exists(audio_file):
+            # Fallback to legacy system
+            fallback_file = 'output.mp3'
+            if os.path.exists(fallback_file):
+                return FileResponse(fallback_file)
+            raise HTTPException(status_code=404, detail="Audio file not found")
+            
+        return FileResponse(audio_file)
     except Exception as e:
-        return jsonify({"error": f"Failed to retrieve audio: {str(e)}"}), 500
+        logger.error(f"Audio retrieval error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve audio: {str(e)}")
 
-@app.route('/process', methods=['POST'])
-@rate_limit(limit=100, window=3600)  # 100 process requests per hour
-def process_transcription():
+@app.post("/process", response_model=ProcessResponse)
+async def process_transcription(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    data: ProcessRequest
+):
+    """Process voice command and control smart home devices"""
     logger.info("Process transcription request received")
+    
     try:
-        # Validate content type
-        if not request.is_json:
-            logger.warning("Request not JSON format")
-            return jsonify({"error": "Content-Type must be application/json"}), 400
-        
-        data = request.json
-        is_valid, message = validate_process_input(data)
-        if not is_valid:
-            logger.warning(f"Invalid input data: {message}")
-            return jsonify({"error": message}), 400
-        
-        text = data.get('text', '').strip()
-        state = data.get('state', '')
-        all_state = data.get('all_state', '')
+        text = data.text
+        state = data.state or ""
+        all_state = data.all_state or ""
         
         logger.info(f"Processing text: {text[:50]}...")
 
@@ -382,44 +384,72 @@ def process_transcription():
             Exemple :
             {commands}
         """
-        user = text
         
-        # Generate response with error handling
-        try:
-            logger.info("Generating AI response")
-            response = gen_response(system, user)
-            logger.info("AI response generated successfully")
-        except ValueError as e:
-            logger.error(f"AI response generation failed: {str(e)}")
-            return jsonify({"error": f"AI response generation failed: {str(e)}"}), 503
+        # Generate response
+        logger.info("Generating AI response")
+        response = await gen_response(system, text)
+        logger.info("AI response generated successfully")
         
         # Validate response structure
-        if not isinstance(response, dict):
-            logger.error("Invalid response format from AI")
-            return jsonify({"error": "Invalid response format from AI"}), 502
-            
         if "assistant_response" not in response:
             logger.error("Missing assistant_response in AI response")
-            return jsonify({"error": "Missing assistant_response in AI response"}), 502
+            raise HTTPException(status_code=502, detail="Missing assistant_response in AI response")
         
-        # Generate speech with error handling
-        try:
-            logger.info("Generating speech audio")
-            speech(response["assistant_response"])
-            # Informer le front que l'audio est prêt
-            socketio.emit('audio_ready', {'url': '/audio'})
-            logger.info("Speech generated and audio ready signal sent")
-        except Exception as e:
-            logger.warning(f"Speech generation failed: {e}")
-            # Continue without audio - don't fail the entire request
+        # Generate speech in background
+        session_id = get_user_session(request)
+        background_tasks.add_task(
+            generate_speech_background, 
+            response["assistant_response"], 
+            session_id
+        )
         
-        logger.info(f"Process completed successfully: {response}")
-        return jsonify(response), 200
+        logger.info(f"Process completed successfully")
+        return ProcessResponse(**response)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Process transcription error: {str(e)}")
-        return jsonify({"error": f"Processing failed: {str(e)}"}), 500
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+
+async def generate_speech_background(text: str, session_id: str):
+    """Background task to generate speech"""
+    max_retries = 2
+    audio_file_path = None
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Generating speech audio (attempt {attempt + 1}/{max_retries})")
+            audio_file_path = speech(text, session_id)
+            
+            # Store the audio file path for this session
+            user_audio_files[session_id] = audio_file_path
+            
+            # Emit audio ready signal via SocketIO
+            await sio.emit('audio_ready', {'url': '/audio', 'session_id': session_id})
+            logger.info("Speech generated and audio ready signal sent")
+            break
+            
+        except Exception as e:
+            logger.warning(f"Speech generation failed (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                logger.error("All speech generation attempts failed")
+
+# SocketIO event handlers
+@sio.event
+async def connect(sid, environ):
+    logger.info(f"Client connected: {sid}")
+
+@sio.event
+async def disconnect(sid):
+    logger.info(f"Client disconnected: {sid}")
 
 if __name__ == '__main__':
-    # app.run(debug=True)
-    socketio.run(app, host="0.0.0.0", port=5000)
+    import uvicorn
+    uvicorn.run(
+        "main:socket_app",  # Use socket_app instead of app for SocketIO support
+        host="0.0.0.0",
+        port=5000,
+        reload=False,  # Set to True for development
+        log_level="info"
+    )

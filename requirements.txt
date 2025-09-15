@@ -1,12 +1,46 @@
-Flask
-Flask-Cors
-pydub
-SpeechRecognition
-requests
-google-generativeai
+# FastAPI Core
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Async HTTP client
+httpx
+
+# WebSocket support
+python-socketio
+
+# Data validation
+pydantic
+
+# File handling
+aiofiles
+
+# Environment and configuration
 python-dotenv
-gunicorn
+
+# CORS middleware (included in FastAPI but explicit for clarity)
+starlette
+
+# Session middleware
+itsdangerous
+
+# Audio processing (assuming these are your existing modules)
+beautifulsoup4
+soupsieve
+
+# Speech recognition (add these if needed for your modules)
+SpeechRecognition
+pyaudio
+pydub
+
+# Google Generative AI (optional based on your GENAI_API_KEY)
+google-generativeai
+
+# Additional dependencies that might be needed
+requests
+numpy
+
 openai
-flask-socketio
-eventlet
-imageio[ffmpeg]
+
+google-genai 
+python-dotenv
