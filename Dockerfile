@@ -26,5 +26,6 @@ COPY . .
 # Port
 EXPOSE 5000
 
-# Commande de démarrage
-CMD ["python", "-m", "uvicorn", "core.main:socket_app", "--host", "0.0.0.0", "--port", "5000"]
+# Commande de démarrage (on démarre depuis le dossier core)
+WORKDIR /app/core
+CMD ["python", "-m", "uvicorn", "main:socket_app", "--host", "0.0.0.0", "--port", "5000"]
