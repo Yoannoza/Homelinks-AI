@@ -15,11 +15,7 @@ class Config:
     GENAI_API_KEY = os.getenv("GENAI_API_KEY")
     
     # CORS origins
-    ALLOWED_ORIGINS = [
-        "https://homelinks.vercel.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
+    ALLOWED_ORIGINS = ["*"]
 
 
     @classmethod

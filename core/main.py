@@ -171,27 +171,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
-allowed_origins = [
-    "https://homelinks.vercel.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+# # CORS configuration
+allowed_origins = ["*"]
 
-# Add localhost for development
-if os.getenv("ENVIRONMENT") != "production":
-    allowed_origins.extend([
-        "http://localhost:5000",
-        "http://127.0.0.1:5000"
-    ])
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=allowed_origins,
+#     allow_credentials=True,
+#     allow_methods=["GET", "POST"],
+#     allow_headers=["*"],
+# )
 
 
 # SocketIO setup
