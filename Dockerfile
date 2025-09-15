@@ -7,7 +7,6 @@ ENV PYTHONUNBUFFERED=1
 # Installation des dépendances système
 RUN apt-get update && apt-get install -y \
     curl \
-    && rm -rf /var/lib/apt/lists/*
     gcc \
     libasound2-dev \
     portaudio19-dev \
