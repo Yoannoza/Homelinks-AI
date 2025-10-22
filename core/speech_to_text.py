@@ -1,5 +1,6 @@
 import google.generativeai as genai
 import os
+import mimetypes
 from dotenv import load_dotenv
 
 
@@ -18,8 +19,24 @@ def transcribe_audio(file_path):
         
         print(f"Uploading audio file: {file_path}")
         
-        # Upload du fichier audio vers Gemini
-        myfile = genai.upload_file(path=file_path, display_name="audio_transcription")
+        # Déterminer le type MIME du fichier
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            # Fallback pour les fichiers audio courants
+            if file_path.endswith('.webm'):
+                mime_type = 'audio/webm'
+            elif file_path.endswith('.wav'):
+                mime_type = 'audio/wav'
+            elif file_path.endswith('.mp3'):
+                mime_type = 'audio/mp3'
+            else:
+                mime_type = 'audio/webm'  # Par défaut
+        
+        # Upload du fichier audio vers Gemini avec le mime_type
+        myfile = genai.upload_file(
+            path=file_path,
+            mime_type=mime_type
+        )
         
         print(f"File uploaded successfully: {myfile.uri}")
         
@@ -32,7 +49,7 @@ def transcribe_audio(file_path):
         """
         
         # Génération de la transcription
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-2.0-flash-exp")
         response = model.generate_content([prompt, myfile])
         
         transcription = response.text.strip()

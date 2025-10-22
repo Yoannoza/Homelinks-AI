@@ -23,3 +23,7 @@ env/
 output.mp3
 /tmp/
 *.pyc
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
