@@ -16,12 +16,24 @@ def transcribe_audio(file_path):
     try:
         print(f"Processing audio file: {file_path}")
         
+        # Vérifier que le fichier existe et a du contenu
+        if not os.path.exists(file_path):
+            raise ValueError(f"Audio file not found: {file_path}")
+        
+        file_size = os.path.getsize(file_path)
+        print(f"Audio file size: {file_size} bytes")
+        
+        if file_size == 0:
+            raise ValueError("Audio file is empty")
+        
         # Créer le client Gemini
         client = genai.Client(api_key=genai_key)
         
         # Lire le fichier audio
         with open(file_path, 'rb') as f:
             audio_bytes = f.read()
+        
+        print(f"Audio bytes read: {len(audio_bytes)} bytes")
         
         # Déterminer le type MIME du fichier
         mime_type = 'audio/webm'

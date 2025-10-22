@@ -230,7 +230,10 @@ async def transcribe_audio_route(
     try:
         # Read file content
         file_content = await audio.read()
-        if not file_content:
+        logger.info(f"File content size: {len(file_content)} bytes")
+        
+        if not file_content or len(file_content) == 0:
+            logger.error("Empty file content received")
             raise HTTPException(status_code=400, detail="Empty file content")
         
         # Save temporary file
