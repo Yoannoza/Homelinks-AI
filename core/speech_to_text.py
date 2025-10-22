@@ -1,6 +1,7 @@
 import google.generativeai as genai
 import os
 import mimetypes
+import base64
 from dotenv import load_dotenv
 
 
@@ -17,7 +18,11 @@ def transcribe_audio(file_path):
         # Configuration de Gemini
         genai.configure(api_key=genai_key)
         
-        print(f"Uploading audio file: {file_path}")
+        print(f"Processing audio file: {file_path}")
+        
+        # Lire le fichier audio en base64
+        with open(file_path, 'rb') as audio_file:
+            audio_data = base64.b64encode(audio_file.read()).decode('utf-8')
         
         # Déterminer le type MIME du fichier
         mime_type, _ = mimetypes.guess_type(file_path)
@@ -32,13 +37,7 @@ def transcribe_audio(file_path):
             else:
                 mime_type = 'audio/webm'  # Par défaut
         
-        # Upload du fichier audio vers Gemini avec le mime_type
-        myfile = genai.upload_file(
-            path=file_path,
-            mime_type=mime_type
-        )
-        
-        print(f"File uploaded successfully: {myfile.uri}")
+        print(f"Audio file type: {mime_type}")
         
         # Prompt pour la transcription en français
         prompt = """
@@ -48,15 +47,19 @@ def transcribe_audio(file_path):
         retourne la transcription exacte telle qu'elle a été prononcée.
         """
         
-        # Génération de la transcription
+        # Génération de la transcription avec inline_data
         model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        response = model.generate_content([prompt, myfile])
+        
+        response = model.generate_content([
+            prompt,
+            {
+                "mime_type": mime_type,
+                "data": audio_data
+            }
+        ])
         
         transcription = response.text.strip()
-        print(f"\n\nTranscription: {transcription}")
-        
-        # Suppression du fichier uploadé pour économiser l'espace
-        genai.delete_file(myfile.name)
+        print(f"Transcription: {transcription}")
         
         return transcription
 

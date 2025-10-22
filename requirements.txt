@@ -33,14 +33,13 @@ SpeechRecognition
 pyaudio
 pydub
 
-# Google Generative AI (optional based on your GENAI_API_KEY)
-google-generativeai
+# Google Generative AI - Version spécifique pour éviter les bugs
+google-generativeai>=0.8.0
 
 # Additional dependencies that might be needed
 requests
 numpy
 
-openai
-
-google-genai 
+# Google GenAI SDK (pour TTS)
+google-genai>=0.1.0
 python-dotenv
