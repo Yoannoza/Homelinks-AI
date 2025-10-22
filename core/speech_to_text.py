@@ -1,7 +1,6 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import os
-import mimetypes
-import base64
 from dotenv import load_dotenv
 
 
@@ -15,48 +14,45 @@ def transcribe_audio(file_path):
         raise ValueError("GENAI_API_KEY is not set in environment variables")
     
     try:
-        # Configuration de Gemini
-        genai.configure(api_key=genai_key)
-        
         print(f"Processing audio file: {file_path}")
         
-        # Lire le fichier audio en base64
-        with open(file_path, 'rb') as audio_file:
-            audio_data = base64.b64encode(audio_file.read()).decode('utf-8')
+        # Créer le client Gemini
+        client = genai.Client(api_key=genai_key)
+        
+        # Lire le fichier audio
+        with open(file_path, 'rb') as f:
+            audio_bytes = f.read()
         
         # Déterminer le type MIME du fichier
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if not mime_type:
-            # Fallback pour les fichiers audio courants
-            if file_path.endswith('.webm'):
-                mime_type = 'audio/webm'
-            elif file_path.endswith('.wav'):
-                mime_type = 'audio/wav'
-            elif file_path.endswith('.mp3'):
-                mime_type = 'audio/mp3'
-            else:
-                mime_type = 'audio/webm'  # Par défaut
+        mime_type = 'audio/webm'
+        if file_path.endswith('.wav'):
+            mime_type = 'audio/wav'
+        elif file_path.endswith('.mp3'):
+            mime_type = 'audio/mp3'
+        elif file_path.endswith('.ogg'):
+            mime_type = 'audio/ogg'
+        elif file_path.endswith('.m4a'):
+            mime_type = 'audio/aac'
         
         print(f"Audio file type: {mime_type}")
         
         # Prompt pour la transcription en français
-        prompt = """
-        Transcris exactement le contenu audio en français. 
-        Ne fais que retourner la transcription textuelle, sans commentaires ni explications.
+        prompt = """Génère une transcription exacte de ce contenu audio en français. 
+        Retourne uniquement la transcription textuelle, sans commentaires ni explications.
         Si l'audio contient des commandes pour une maison connectée (lumières, portes, etc.), 
-        retourne la transcription exacte telle qu'elle a été prononcée.
-        """
+        transcris exactement ce qui a été dit."""
         
-        # Génération de la transcription avec inline_data
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        
-        response = model.generate_content([
-            prompt,
-            {
-                "mime_type": mime_type,
-                "data": audio_data
-            }
-        ])
+        # Génération de la transcription avec inline audio
+        response = client.models.generate_content(
+            model='gemini-2.0-flash-exp',
+            contents=[
+                prompt,
+                types.Part.from_bytes(
+                    data=audio_bytes,
+                    mime_type=mime_type,
+                )
+            ]
+        )
         
         transcription = response.text.strip()
         print(f"Transcription: {transcription}")
