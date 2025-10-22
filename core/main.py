@@ -188,12 +188,7 @@ async def health_check():
     try:
         # Test basic functionality
         current_time = datetime.now().isoformat()
-        
-        # Check environment variables
-        env_status = {
-            "genai_api_key": bool(GENAI_API_KEY),
-            "gemini_api_key": bool(GEMINI_API_KEY),
-        }
+    
         
         # Check services availability (basic test)
         services_status = {
@@ -206,7 +201,6 @@ async def health_check():
             "status": "healthy",
             "timestamp": current_time,
             "services": services_status,
-            "environment": env_status,
             "version": "1.0",
             "uptime": current_time
         }
