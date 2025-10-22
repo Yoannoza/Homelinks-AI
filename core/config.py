@@ -21,7 +21,8 @@ class Config:
         "http://127.0.0.1:3000",
         "https://127.0.0.1:3000",
         "https://homelinks.yoann-oza.me",
-        "http://homelinks.yoann-oza.me"
+        "http://homelinks.yoann-oza.me",
+        "https://homelinks.vercel.app"
     ]
 
 
