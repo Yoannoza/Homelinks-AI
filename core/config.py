@@ -15,7 +15,14 @@ class Config:
     GENAI_API_KEY = os.getenv("GENAI_API_KEY")
     
     # CORS origins
-    ALLOWED_ORIGINS = ["*"]
+    ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "https://localhost:3000", 
+        "http://127.0.0.1:3000",
+        "https://127.0.0.1:3000",
+        "https://homelinks.yoann-oza.me",
+        "http://homelinks.yoann-oza.me"
+    ]
 
 
     @classmethod

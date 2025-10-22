@@ -23,23 +23,15 @@ from audio_processing import save_temp_file, clean_temp_file, cleanup_old_temp_f
 from speech_to_text import transcribe_audio
 from tts import speech
 from ai_response import generate_ai_response
+from config import Config
 
 # Load environment variables
 load_dotenv()
 
 # Environment variables validation
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GENAI_API_KEY = os.getenv("GENAI_API_KEY")
-
 def validate_environment():
     """Validate that required environment variables are set"""
-    missing_vars = []
-    if not GENAI_API_KEY:
-        missing_vars.append("GENAI_API_KEY")  # Maintenant requis pour la transcription
-    if not GEMINI_API_KEY:
-        missing_vars.append("GEMINI_API_KEY")  # Maintenant requis pour la transcription
-
-    
+    missing_vars = Config.validate_required_keys()
     if missing_vars:
         print(f"Warning: Missing required environment variables: {', '.join(missing_vars)}")
         print("Some core features will not work properly without these variables.")
@@ -172,7 +164,7 @@ app = FastAPI(
 )
 
 # # CORS configuration
-allowed_origins = ["*"]
+allowed_origins = Config.ALLOWED_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,

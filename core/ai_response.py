@@ -19,7 +19,7 @@ class AIResponseGenerator:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set in environment variables")
         
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-2.5-flash-lite"
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         
     def generate_response(self, user_text, home_state=""):
